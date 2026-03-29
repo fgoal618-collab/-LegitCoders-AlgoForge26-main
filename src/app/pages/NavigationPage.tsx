@@ -484,19 +484,6 @@ export function NavigationPage() {
     searchSessionRef.current = null; // Reset session
   }, [origin]);
 
-  const confirmDestination = useCallback(() => {
-    if (!selectedDestination) return;
-    setDestinationConfirmed(true);
-    computeJourneyRoutes();
-  }, [selectedDestination, origin]);
-
-  // Auto-compute when destinationConfirmed is set from router state initialization
-  useEffect(() => {
-    if (destinationConfirmed && origin && selectedDestination && journeyRoutes.length === 0 && !isComputing) {
-      computeJourneyRoutes();
-    }
-  }, [destinationConfirmed, origin, selectedDestination]);
-
   // ─── Journey Route Computation (Smart Engine) ───────────────
   const computeJourneyRoutes = useCallback(async () => {
     if (!origin || !selectedDestination) return;
@@ -520,6 +507,19 @@ export function NavigationPage() {
     }
     setIsComputing(false);
   }, [origin, selectedDestination]);
+
+  const confirmDestination = useCallback(() => {
+    if (!selectedDestination) return;
+    setDestinationConfirmed(true);
+    computeJourneyRoutes();
+  }, [selectedDestination, origin, computeJourneyRoutes]);
+
+  // Auto-compute when destinationConfirmed is set from router state initialization
+  useEffect(() => {
+    if (destinationConfirmed && origin && selectedDestination && journeyRoutes.length === 0 && !isComputing) {
+      computeJourneyRoutes();
+    }
+  }, [destinationConfirmed, origin, selectedDestination, journeyRoutes.length, isComputing, computeJourneyRoutes]);
 
   // ─── Map Rendering ──────────────────────────────────────────
   const clearRouteRenderers = () => {
