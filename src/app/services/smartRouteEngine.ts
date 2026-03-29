@@ -601,7 +601,7 @@ function pickTop3(candidates: SmartRoute[], dist: number): SmartRoute[] {
   comfortable.label = '🛋️ Comfortable';
 
   // Deduplicate: if all 3 are same, pick different ones
-  const result = [timeSaver];
+  const result: SmartRoute[] = [timeSaver];
   if (moneySaver.id !== timeSaver.id) result.push(moneySaver);
   else if (scored.length > 1) {
     const alt = scored.find(s => s.route.id !== timeSaver.id);
@@ -613,14 +613,41 @@ function pickTop3(candidates: SmartRoute[], dist: number): SmartRoute[] {
     if (alt) { alt.route.type = 'comfortable'; alt.route.label = '🛋️ Comfortable'; result.push(alt.route); }
   }
 
-  // Ensure we always have at least the cab as comfortable if we have < 3
-  if (result.length < 3) {
-    const cab = candidates.find(c => c.id === 'cab');
-    if (cab && !result.some(r => r.id === 'cab')) {
-      cab.type = 'comfortable';
-      cab.label = '🛋️ Comfortable';
-      result.push(cab);
+  // If we still have fewer than 3 unique options, fill missing types with clones
+  const requiredTypes: SmartRouteType[] = ['time_saver', 'money_saver', 'comfortable'];
+  const hasType = (t: SmartRouteType) => result.some(r => r.type === t);
+
+  const cloneForType = (source: SmartRoute, type: SmartRouteType, label: string): SmartRoute => {
+    return {
+      ...JSON.parse(JSON.stringify(source)),
+      id: `${source.id}-${type}`,
+      type,
+      label,
+      recommended: type === 'time_saver' ? true : source.recommended,
+    };
+  };
+
+  for (const type of requiredTypes) {
+    if (!hasType(type)) {
+      let base: SmartRoute | undefined;
+      if (type === 'time_saver') base = scored[0]?.route || candidates[0];
+      if (type === 'money_saver') base = scored.sort((a, b) => a.costScore - b.costScore)[0]?.route || candidates[0];
+      if (type === 'comfortable') base = scored.sort((a, b) => a.comfortScore - b.comfortScore)[0]?.route || candidates[0];
+
+      if (!base) continue;
+      const label = type === 'time_saver' ? '⚡ Time Saver' : type === 'money_saver' ? '💰 Money Saver' : '🛋️ Comfortable';
+      const clone = cloneForType(base, type, label);
+      if (!result.some(r => r.id === clone.id)) result.push(clone);
     }
+  }
+
+  // Fallback to duplicates with distinct id/labels in extreme cases
+  while (result.length < 3 && result.length > 0) {
+    const source = result[0];
+    const missingType = requiredTypes.find((t) => !result.some((r) => r.type === t));
+    if (!missingType) break;
+    const label = missingType === 'time_saver' ? '⚡ Time Saver' : missingType === 'money_saver' ? '💰 Money Saver' : '🛋️ Comfortable';
+    result.push({ ...cloneForType(source, missingType, label), id: `${source.id}-${missingType}-${result.length}` });
   }
 
   return result.slice(0, 3);

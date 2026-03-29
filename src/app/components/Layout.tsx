@@ -203,7 +203,7 @@ export function Layout({ children }: { children: ReactNode }) {
       
       {/* Interactive animated gradient background */}
       <div className="fixed inset-0 pointer-events-none z-0">
-        <div className="absolute inset-0 bg-[#faf9f7]" />
+        <div className="absolute inset-0 bg-[#faf9f7] bg-gradient-layer" />
         
         {/* 3D Perspective Grid */}
         <div 

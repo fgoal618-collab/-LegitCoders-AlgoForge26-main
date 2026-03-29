@@ -66,6 +66,8 @@ export function NavigationPage() {
   const [isSearchingSource, setIsSearchingSource] = useState(false);
   const [showSourceDrop, setShowSourceDrop] = useState(false);
 
+  const [voiceTarget, setVoiceTarget] = useState<'origin' | 'destination'>('destination');
+
   // Destination search
   const [destText, setDestText] = useState('');
   const [destSuggestions, setDestSuggestions] = useState<DestinationSuggestion[]>([]);
@@ -380,40 +382,71 @@ export function NavigationPage() {
   };
 
   // ─── Voice Search ─────────────────────────────────────────
-  const startVoiceSearch = useCallback(() => {
+  const startVoiceSearch = useCallback((target: 'origin' | 'destination') => {
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
       alert('Voice search not supported in your browser');
       return;
     }
-    
+
+    setVoiceTarget(target);
     setIsVoiceMode(true);
     setIsListening(true);
-    
+
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     const recognition = new SpeechRecognition();
-    
+
     recognition.lang = 'en-IN';
     recognition.continuous = false;
-    recognition.interimResults = false;
-    
+    recognition.interimResults = true;
+
+    let finalTranscript = '';
+
     recognition.onresult = (event: any) => {
-      const transcript = event.results[0][0].transcript;
-      setDestText(transcript);
-      searchDestination(transcript);
-      setIsListening(false);
+      let interimTranscript = '';
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          finalTranscript += transcript + ' ';
+        } else {
+          interimTranscript += transcript;
+        }
+      }
+
+      const currentTranscript = finalTranscript || interimTranscript;
+
+      if (target === 'origin') {
+        setOriginText(currentTranscript);
+      } else {
+        setDestText(currentTranscript);
+      }
+
+      if (event.results[event.results.length - 1].isFinal) {
+        const result = finalTranscript.trim();
+        if (target === 'origin') {
+          searchSourceLocation(result);
+          setShowSourceDrop(true);
+        } else {
+          searchDestination(result);
+          setShowSourceDrop(false);
+        }
+      }
     };
-    
-    recognition.onerror = () => {
+
+    recognition.onerror = (event: any) => {
+      console.error('Voice recognition error:', event.error);
+      setIsListening(false);
+      if (event.error === 'aborted') {
+        return;
+      }
+    };
+
+    recognition.onend = () => {
       setIsListening(false);
       setIsVoiceMode(false);
     };
-    
-    recognition.onend = () => {
-      setIsListening(false);
-    };
-    
+
     recognition.start();
-  }, [searchDestination]);
+  }, [searchDestination, searchSourceLocation]);
   const selectSuggestion = useCallback((suggestion: DestinationSuggestion) => {
     if (!suggestion.lat || !suggestion.lng) return;
     const dest: PlaceInfo = { name: suggestion.name, lat: suggestion.lat, lng: suggestion.lng, address: suggestion.secondaryText };
@@ -604,6 +637,23 @@ export function NavigationPage() {
             {/* ── Source Input ── */}
             <div>
               <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5 block">Starting Point</label>
+
+              <div className="flex gap-2 mb-2">
+                <button
+                  onClick={() => { setIsVoiceMode(false); setVoiceTarget('origin'); }}
+                  className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-bold transition-all ${voiceTarget === 'origin' && !isVoiceMode ? 'bg-brand-primary text-white shadow-md' : 'bg-gray-100 text-gray-600'}`}
+                >
+                  <Search className="w-4 h-4" /> Manual Search
+                </button>
+                <button
+                  onClick={() => { setVoiceTarget('origin'); startVoiceSearch('origin'); }}
+                  className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-bold transition-all ${voiceTarget === 'origin' && isVoiceMode ? 'bg-brand-cta text-white shadow-md' : 'bg-gray-100 text-gray-600'}`}
+                >
+                  <div className={`w-2 h-2 rounded-full ${isListening ? 'bg-white animate-pulse' : 'bg-current'}`} />
+                  Voice Search
+                </button>
+              </div>
+
               {!editingSource && origin ? (
                 <div className="flex items-center gap-3 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 cursor-pointer" onClick={() => setEditingSource(true)}>
                   <div className="w-2.5 h-2.5 bg-emerald-500 rounded-full shrink-0" />
@@ -702,14 +752,14 @@ export function NavigationPage() {
               {!destinationConfirmed && (
                 <div className="flex gap-2 mb-2">
                   <button 
-                    onClick={() => setIsVoiceMode(false)}
-                    className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-bold transition-all ${!isVoiceMode ? 'bg-brand-primary text-white shadow-md' : 'bg-gray-100 text-gray-600'}`}
+                    onClick={() => { setIsVoiceMode(false); setVoiceTarget('destination'); }}
+                    className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-bold transition-all ${voiceTarget === 'destination' && !isVoiceMode ? 'bg-brand-primary text-white shadow-md' : 'bg-gray-100 text-gray-600'}`}
                   >
                     <Search className="w-4 h-4" /> Manual Search
                   </button>
                   <button 
-                    onClick={() => { setIsVoiceMode(true); startVoiceSearch(); }}
-                    className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-bold transition-all ${isVoiceMode ? 'bg-brand-cta text-white shadow-md' : 'bg-gray-100 text-gray-600'}`}
+                    onClick={() => { setVoiceTarget('destination'); startVoiceSearch('destination'); }}
+                    className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-bold transition-all ${voiceTarget === 'destination' && isVoiceMode ? 'bg-brand-cta text-white shadow-md' : 'bg-gray-100 text-gray-600'}`}
                   >
                     <div className={`w-2 h-2 rounded-full ${isListening ? 'bg-white animate-pulse' : 'bg-current'}`} />
                     Voice Search

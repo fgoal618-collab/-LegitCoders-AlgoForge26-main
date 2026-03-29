@@ -109,6 +109,7 @@ export function HomePage() {
   const [selectedDest, setSelectedDest] = useState<PlaceInfo | null>(null);
   const [isVoiceMode, setIsVoiceMode] = useState(false);
   const [isListening, setIsListening] = useState(false);
+  const [voiceTarget, setVoiceTarget] = useState<'origin' | 'destination'>('destination');
 
   // Preview
   const [nearbyTransit, setNearbyTransit] = useState<NearbyTransitSummary | null>(null);
@@ -254,19 +255,10 @@ export function HomePage() {
   }, []);
 
   // ─── Voice Search ─────────────────────────────────────────
-  const startVoiceSearch = useCallback(() => {
+  const startVoiceSearch = useCallback((target: 'origin' | 'destination' = 'destination') => {
     // Check for HTTPS or localhost
     const isSecureContext = window.isSecureContext;
     const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-    
-    // Detect browser
-    const ua = navigator.userAgent;
-    const isChrome = /Chrome/.test(ua) && !/Edg/.test(ua);
-    const isEdge = /Edg/.test(ua);
-    const isSafari = /Safari/.test(ua) && !/Chrome/.test(ua);
-    
-    console.log('Browser:', { isChrome, isEdge, isSafari, userAgent: ua });
-    console.log('Secure context:', isSecureContext, 'Localhost:', isLocalhost);
     
     if (!isSecureContext && !isLocalhost) {
       alert('Voice search requires HTTPS. Please use a secure connection or localhost.');
@@ -278,11 +270,7 @@ export function HomePage() {
       return;
     }
     
-    // Warn about known issues
-    if (!isChrome && !isEdge && !isSafari) {
-      console.warn('Speech recognition may not work well in this browser');
-    }
-    
+    setVoiceTarget(target);
     setIsVoiceMode(true);
     setIsListening(true);
     
@@ -293,74 +281,95 @@ export function HomePage() {
     recognition.continuous = false;
     recognition.interimResults = true;
     
+    let finalTranscript = '';
+    
     recognition.onstart = () => {
       console.log('Voice recognition started - listening...');
       setIsListening(true);
     };
     
     recognition.onresult = (event: any) => {
-      const transcript = event.results[0][0].transcript;
-      setDestText(transcript);
-      if (event.results[0].isFinal) {
-        setIsListening(false);
-        // Trigger search and auto-select after a delay
-        searchDest(transcript);
-        // Wait for suggestions to populate then auto-select first one
-        setTimeout(() => {
-          const currentSuggestions = suggestionsRef.current;
-          if (currentSuggestions.length > 0 && currentSuggestions[0].lat && currentSuggestions[0].lng) {
-            const first = currentSuggestions[0];
-            setSelectedDest({ name: first.name, lat: first.lat, lng: first.lng, address: first.secondary });
-            setDestText(first.name);
-            setSuggestionsWithRef([]);
-          }
-        }, 1500);
+      let interimTranscript = '';
+      
+      // Combine all results
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript;
+        
+        if (event.results[i].isFinal) {
+          finalTranscript += transcript + ' ';
+        } else {
+          interimTranscript += transcript;
+        }
+      }
+      
+      // Update UI with interim or final transcript
+      const currentTranscript = finalTranscript || interimTranscript;
+      
+      if (target === 'origin') {
+        setSourceText(currentTranscript);
+      } else {
+        setDestText(currentTranscript);
+      }
+      
+      // Only process when we have a final result
+      if (event.results[event.results.length - 1].isFinal) {
+        const result = finalTranscript.trim();
+        
+        if (target === 'origin') {
+          // Trigger search and let the normal flow handle suggestions
+          searchSource(result);
+        } else {
+          searchDest(result);
+        }
       }
     };
     
     recognition.onerror = (event: any) => {
-      console.error('Voice recognition error:', event.error, 'Message:', event.message);
+      console.error('Voice recognition error:', event.error);
       setIsListening(false);
+      
+      // Silently handle aborted errors (user caused or system interrupt)
+      if (event.error === 'aborted') {
+        console.log('Voice recognition was interrupted');
+        return;
+      }
+      
       if (event.error === 'not-allowed') {
-        alert('Microphone access denied. Please allow microphone permission in your browser settings (click the lock icon in the address bar).');
+        alert('Microphone access denied. Please allow microphone permission in browser settings.');
       } else if (event.error === 'no-speech') {
-        alert('No speech detected. Please try again and speak clearly into your microphone.');
+        alert('No speech detected. Please try again and speak clearly.');
       } else if (event.error === 'network') {
-        // Provide helpful suggestions for network errors
-        let msg = 'Network error: Cannot connect to speech recognition servers.\n\n';
-        msg += 'Try these fixes:\n';
-        msg += '1. Refresh the page and try again\n';
-        msg += '2. Use Chrome or Edge browser\n';
-        msg += '3. Disable any VPN or proxy\n';
-        msg += '4. Check if speech services are blocked in your region\n\n';
-        msg += 'You can still use Manual Search instead!';
-        alert(msg);
-      } else if (event.error === 'aborted') {
-        console.log('Voice recognition aborted by user');
-      } else {
-        alert('Voice recognition error: ' + event.error + '. Please try Manual Search instead.');
+        alert('Network error. Please check your internet connection and try again.');
+      } else if (event.error !== 'aborted') {
+        console.log('Voice error:', event.error);
       }
     };
     
     recognition.onend = () => {
       console.log('Voice recognition ended');
       setIsListening(false);
+      setIsVoiceMode(false);
     };
     
     try {
       recognition.start();
-      console.log('Recognition.start() called successfully');
     } catch (err) {
       console.error('Failed to start recognition:', err);
       setIsListening(false);
-      alert('Failed to start voice recognition. Please use Manual Search.');
+      setIsVoiceMode(false);
     }
-  }, [searchDest]);
+  }, [searchDest, searchSource]);
 
   // Navigate to Planner
-  const goToPlanner = () => navigate('/planner', {
-    state: { origin: origin || undefined, destination: selectedDest || undefined },
-  });
+  const goToPlanner = () => {
+    if (!origin) {
+      alert('Please set your starting point first');
+      return;
+    }
+    navigate('/planner', {
+      state: { origin: origin || undefined, destination: selectedDest || undefined },
+    });
+  };
 
   const totalNearby = nearbyTransit
     ? nearbyTransit.busStops.length + nearbyTransit.trainStations.length + nearbyTransit.metroStations.length
@@ -410,6 +419,26 @@ export function HomePage() {
               {/* Source */}
               <div className="mb-4">
                 <label className="text-[10px] font-extrabold text-gray-400 uppercase tracking-widest mb-2 block">Where are you now?</label>
+
+                {/* Voice/Manual toggle for source */}
+                {editingSource && (
+                  <div className="flex gap-2 mb-2">
+                    <button
+                      onClick={() => { setIsVoiceMode(false); setVoiceTarget('origin'); }}
+                      className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-bold transition-all ${voiceTarget === 'origin' && !isVoiceMode ? 'bg-brand-primary text-white shadow-md' : 'bg-gray-100 text-gray-600'}`}
+                    >
+                      <Search className="w-4 h-4" /> Manual
+                    </button>
+                    <button
+                      onClick={() => { setVoiceTarget('origin'); startVoiceSearch('origin'); }}
+                      className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-bold transition-all ${voiceTarget === 'origin' && isVoiceMode ? 'bg-brand-cta text-white shadow-md' : 'bg-gray-100 text-gray-600'}`}
+                    >
+                      <div className={`w-2 h-2 rounded-full ${isListening ? 'bg-white animate-pulse' : 'bg-current'}`} />
+                      Voice
+                    </button>
+                  </div>
+                )}
+
                 {!editingSource && origin ? (
                   <div className="flex items-center gap-3 bg-emerald-50/70 border border-emerald-200 rounded-2xl px-5 py-3.5 cursor-pointer hover:bg-emerald-50 transition-colors"
                     onClick={() => setEditingSource(true)}>
@@ -501,14 +530,14 @@ export function HomePage() {
                 {/* Search Mode Toggle */}
                 <div className="flex gap-2 mb-2">
                   <button 
-                    onClick={() => setIsVoiceMode(false)}
-                    className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-bold transition-all ${!isVoiceMode ? 'bg-brand-primary text-white shadow-md' : 'bg-gray-100 text-gray-600'}`}
+                    onClick={() => { setIsVoiceMode(false); setVoiceTarget('destination'); }}
+                    className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-bold transition-all ${voiceTarget === 'destination' && !isVoiceMode ? 'bg-brand-primary text-white shadow-md' : 'bg-gray-100 text-gray-600'}`}
                   >
                     <Search className="w-4 h-4" /> Manual Search
                   </button>
                   <button 
-                    onClick={() => { setIsVoiceMode(true); startVoiceSearch(); }}
-                    className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-bold transition-all ${isVoiceMode ? 'bg-brand-cta text-white shadow-md' : 'bg-gray-100 text-gray-600'}`}
+                    onClick={() => { setVoiceTarget('destination'); startVoiceSearch('destination'); }}
+                    className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-bold transition-all ${voiceTarget === 'destination' && isVoiceMode ? 'bg-brand-cta text-white shadow-md' : 'bg-gray-100 text-gray-600'}`}
                   >
                     <div className={`w-2 h-2 rounded-full ${isListening ? 'bg-white animate-pulse' : 'bg-current'}`} />
                     Voice Search
@@ -584,7 +613,7 @@ export function HomePage() {
               {/* CTA Button */}
               <button onClick={goToPlanner}
                 disabled={!origin}
-                className="w-full flex items-center justify-center gap-2.5 bg-[#b8954f] text-white py-4 rounded-2xl font-extrabold text-[15px] shadow-lg hover:shadow-xl hover:brightness-105 active:scale-[0.98] transition-all disabled:bg-[#e8e4de] disabled:text-[#6b6560] disabled:cursor-not-allowed disabled:shadow-none">
+                className="w-full flex items-center justify-center gap-2.5 bg-[#b8954f] text-white py-4 rounded-2xl font-extrabold text-[15px] shadow-lg hover:shadow-xl hover:brightness-105 active:scale-[0.98] transition-all disabled:bg-[#e8e4de] disabled:text-[#6b6560] disabled:cursor-not-allowed disabled:shadow-none hover:disabled:brightness-100">
                 <Route className="w-5 h-5" />
                 {selectedDest ? 'Find Best Routes' : 'Plan a Trip'}
                 <ArrowRight className="w-4 h-4 ml-1" />
